@@ -1,0 +1,245 @@
+#!/usr/bin/env python
+
+import time
+import numpy as np
+
+import torch
+import torchvision.utils
+from fvcore.common.checkpoint import Checkpointer
+
+from gaze_estimation import (GazeEstimationMethod, create_dataloader,
+                             create_logger, create_loss, create_model,
+                             create_optimizer, create_scheduler,
+                             create_tensorboard_writer)
+from gaze_estimation.utils import (AverageMeter, compute_angle_error,
+                                   create_train_output_dir, load_config,
+                                   save_config, set_seeds, setup_cudnn)
+import os
+
+
+def compute_pose_mae(predictions: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    """计算 Head Pose 的平均绝对误差 (Mean Absolute Error, MAE)，假设输入为弧度，输出转换为角度"""
+    mae_radians = torch.abs(predictions - labels).mean(dim=1)
+    mae_degrees = mae_radians * 180 / np.pi
+    return mae_degrees
+
+
+def train(epoch, model, optimizer, scheduler, loss_function, train_loader,
+          config, tensorboard_writer, logger):
+    logger.info(f'Train {epoch}')
+
+    model.train()
+    device = torch.device(config.device)
+
+    # 为每个指标创建独立的 AverageMeter
+    loss_meter = AverageMeter()
+    gaze_loss_meter = AverageMeter()
+    pose_loss_meter = AverageMeter()
+    gaze_angle_error_meter = AverageMeter()
+    pose_angle_error_meter = AverageMeter()
+    
+    start = time.time()
+    for step, (images, poses, gazes) in enumerate(train_loader):
+        if config.tensorboard.train_images and step == 0:
+            image = torchvision.utils.make_grid(images,
+                                                normalize=True,
+                                                scale_each=True)
+            tensorboard_writer.add_image('Train/Image', image, epoch)
+
+        images = images.to(device)
+        poses = poses.to(device)
+        gazes = gazes.to(device)
+
+        optimizer.zero_grad()
+
+        if config.mode == GazeEstimationMethod.MPIIGaze.name:
+            raise NotImplementedError("multi-task for MPIIGaze is not implemented")
+        elif config.mode == GazeEstimationMethod.MPIIFaceGaze.name:
+            out_gaze, out_pose = model(images)
+        else:
+            raise ValueError
+        
+        # 计算各自的损失
+        loss_gaze = loss_function(out_gaze, gazes)
+        loss_pose = loss_function(out_pose, poses)
+        
+        # 应用权重并计算总损失
+        loss = (config.train.gaze_loss_weight * loss_gaze +
+                config.train.pose_loss_weight * loss_pose)
+        
+        loss.backward()
+        optimizer.step()
+
+        # 修复：Gaze 继续使用空间向量夹角，Pose 改用欧拉角的平均绝对误差
+        gaze_angle_error = compute_angle_error(out_gaze, gazes).mean()
+        pose_angle_error = compute_pose_mae(out_pose, poses).mean()
+
+        # 更新所有指标
+        num = images.size(0)
+        loss_meter.update(loss.item(), num)
+        gaze_loss_meter.update(loss_gaze.item(), num)
+        pose_loss_meter.update(loss_pose.item(), num)
+        gaze_angle_error_meter.update(gaze_angle_error.item(), num)
+        pose_angle_error_meter.update(pose_angle_error.item(), num)
+
+        if step % config.train.log_period == 0:
+            logger.info(f'Epoch {epoch} '
+                        f'Step {step}/{len(train_loader)} '
+                        f'lr {scheduler.get_last_lr()[0]:.6f} '
+                        f'loss {loss_meter.val:.4f} ({loss_meter.avg:.4f}) '
+                        f'gaze angle error {gaze_angle_error_meter.val:.2f} '
+                        f'({gaze_angle_error_meter.avg:.2f}) '
+                        f'pose MAE {pose_angle_error_meter.val:.2f} '
+                        f'({pose_angle_error_meter.avg:.2f})')
+
+    elapsed = time.time() - start
+    logger.info(f'Elapsed {elapsed:.2f}')
+
+    # 优化 TensorBoard 标签
+    tensorboard_writer.add_scalar('Loss/total/train', loss_meter.avg, epoch)
+    tensorboard_writer.add_scalar('Loss/gaze/train', gaze_loss_meter.avg, epoch)
+    tensorboard_writer.add_scalar('Loss/pose/train', pose_loss_meter.avg, epoch)
+    tensorboard_writer.add_scalar('AngleError/Gaze/train', gaze_angle_error_meter.avg, epoch)
+    tensorboard_writer.add_scalar('AngleError/PoseMAE/train', pose_angle_error_meter.avg, epoch)
+    tensorboard_writer.add_scalar('Train/lr', scheduler.get_last_lr()[0], epoch)
+    tensorboard_writer.add_scalar('Train/Time', elapsed, epoch)
+
+
+def validate(epoch, model, loss_function, val_loader, config,
+             tensorboard_writer, logger):
+    logger.info(f'Val {epoch}')
+
+    model.eval()
+    device = torch.device(config.device)
+
+    loss_meter = AverageMeter()
+    gaze_loss_meter = AverageMeter()
+    pose_loss_meter = AverageMeter()
+    gaze_angle_error_meter = AverageMeter()
+    pose_angle_error_meter = AverageMeter()
+    start = time.time()
+
+    with torch.no_grad():
+        for step, (images, poses, gazes) in enumerate(val_loader):
+            if config.tensorboard.val_images and epoch == 0 and step == 0:
+                image = torchvision.utils.make_grid(images,
+                                                    normalize=True,
+                                                    scale_each=True)
+                tensorboard_writer.add_image('Val/Image', image, epoch)
+
+            images = images.to(device)
+            poses = poses.to(device)
+            gazes = gazes.to(device)
+
+            if config.mode == GazeEstimationMethod.MPIIGaze.name:
+                raise NotImplementedError("multi-task for MPIIGaze is not implemented")
+            elif config.mode == GazeEstimationMethod.MPIIFaceGaze.name:
+                out_gaze, out_pose = model(images)
+            else:
+                raise ValueError
+            
+            loss_gaze = loss_function(out_gaze, gazes)
+            loss_pose = loss_function(out_pose, poses)
+            loss = (config.train.gaze_loss_weight * loss_gaze +
+                    config.train.pose_loss_weight * loss_pose)
+
+            # 修复评估逻辑
+            gaze_angle_error = compute_angle_error(out_gaze, gazes).mean()
+            pose_angle_error = compute_pose_mae(out_pose, poses).mean()
+
+            num = images.size(0)
+            loss_meter.update(loss.item(), num)
+            gaze_loss_meter.update(loss_gaze.item(), num)
+            pose_loss_meter.update(loss_pose.item(), num)
+            gaze_angle_error_meter.update(gaze_angle_error.item(), num)
+            pose_angle_error_meter.update(pose_angle_error.item(), num)
+
+    logger.info(f'Epoch {epoch} '
+                f'loss {loss_meter.avg:.4f} '
+                f'gaze angle error {gaze_angle_error_meter.avg:.2f} '
+                f'pose MAE {pose_angle_error_meter.avg:.2f}')
+
+    elapsed = time.time() - start
+    logger.info(f'Elapsed {elapsed:.2f}')
+
+    if epoch > 0:
+        # 优化 TensorBoard 标签
+        tensorboard_writer.add_scalar('Loss/total/validation', loss_meter.avg, epoch)
+        tensorboard_writer.add_scalar('Loss/gaze/validation', gaze_loss_meter.avg, epoch)
+        tensorboard_writer.add_scalar('Loss/pose/validation', pose_loss_meter.avg, epoch)
+        tensorboard_writer.add_scalar('AngleError/Gaze/validation', gaze_angle_error_meter.avg, epoch)
+        tensorboard_writer.add_scalar('AngleError/PoseMAE/validation', pose_angle_error_meter.avg, epoch)
+    tensorboard_writer.add_scalar('Val/Time', elapsed, epoch)
+
+    if config.tensorboard.model_params:
+        for name, param in model.named_parameters():
+            tensorboard_writer.add_histogram(name, param, epoch)
+
+
+def main():
+    config = load_config()
+
+    set_seeds(config.train.seed)
+    setup_cudnn(config)
+
+    resume_checkpoint = getattr(config.train, 'resume', '')
+
+    import pathlib
+    output_root_dir = pathlib.Path(config.train.output_dir)
+    if config.train.test_id != -1:
+        output_dir = output_root_dir / f'{config.train.test_id:02}'
+    else:
+        output_dir = output_root_dir / 'all'
+    if not output_dir.exists():
+        output_dir.mkdir(exist_ok=True, parents=True)
+
+    save_config(config, output_dir)
+    logger = create_logger(name=__name__,
+                           output_dir=output_dir,
+                           filename='log.txt')
+    logger.info(config)
+
+    train_loader, val_loader = create_dataloader(config, is_train=True)
+    model = create_model(config)
+    loss_function = create_loss(config)
+    optimizer = create_optimizer(config, model)
+    scheduler = create_scheduler(config, optimizer)
+    
+    checkpointer = Checkpointer(model,
+                                optimizer=optimizer,
+                                scheduler=scheduler,
+                                save_dir=output_dir.as_posix(),
+                                save_to_disk=True)
+    
+    tensorboard_writer = create_tensorboard_writer(config, output_dir)
+
+    start_epoch = 1
+    if resume_checkpoint:
+        logger.info(f"Resuming from checkpoint: {resume_checkpoint}")
+        checkpoint_data = checkpointer.resume_or_load(resume_checkpoint, resume=True)
+        if checkpoint_data and 'epoch' in checkpoint_data:
+             start_epoch = checkpoint_data['epoch'] + 1
+
+    if config.train.val_first and start_epoch == 1:
+        validate(0, model, loss_function, val_loader, config,
+                 tensorboard_writer, logger)
+
+    for epoch in range(start_epoch, config.scheduler.epochs + 1):
+        train(epoch, model, optimizer, scheduler, loss_function, train_loader,
+              config, tensorboard_writer, logger)
+        scheduler.step()
+
+        if epoch % config.train.val_period == 0:
+            validate(epoch, model, loss_function, val_loader, config,
+                     tensorboard_writer, logger)
+
+        if (epoch % config.train.checkpoint_period == 0
+                or epoch == config.scheduler.epochs):
+            checkpoint_config = {'epoch': epoch, 'config': config.as_dict()}
+            checkpointer.save(f'checkpoint_{epoch:04d}', **checkpoint_config)
+
+    tensorboard_writer.close()
+
+
+if __name__ == '__main__':
+    main()
