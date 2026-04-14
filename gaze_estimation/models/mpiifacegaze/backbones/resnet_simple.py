@@ -20,14 +20,16 @@ class Model(torchvision.models.ResNet):
 
         pretrained_name = config.model.backbone.pretrained
         if pretrained_name:
-            state_dict = torch.hub.load_state_dict_from_url(
-                torchvision.models.resnet.model_urls[pretrained_name])
+            # ============== 最终修复：解决 self 参数缺失问题 ==============
+            # 1. 获取权重类
+            weights_cls = torchvision.models.get_model_weights(pretrained_name)
+            # 2. 获取默认权重实例 (必须加 .DEFAULT)
+            weights = weights_cls.DEFAULT
+            # 3. 加载权重字典
+            state_dict = weights.get_state_dict()
+            # ============================================================
             self.load_state_dict(state_dict, strict=False)
-            # While the pretrained models of torchvision are trained
-            # using images with RGB channel order, in this repository
-            # images are treated as BGR channel order.
-            # Therefore, reverse the channel order of the first
-            # convolutional layer.
+
             module = self.conv1
             module.weight.data = module.weight.data[:, [2, 1, 0]]
 

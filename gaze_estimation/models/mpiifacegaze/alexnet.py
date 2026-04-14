@@ -10,8 +10,40 @@ import yacs.config
 class Model(nn.Module):
     def __init__(self, config: yacs.config.CfgNode):
         super().__init__()
-        self.feature_extractor = torchvision.models.alexnet(
-            pretrained=True).features
+        # 尝试下载和加载官方带有哈希校验的模型
+        try:
+            # 兼容不同版本的 torchvision
+            if hasattr(torchvision.models, 'AlexNet_Weights'):
+                 self.feature_extractor = torchvision.models.alexnet(
+                     weights=torchvision.models.AlexNet_Weights.IMAGENET1K_V1
+                 ).features
+            else:
+                 self.feature_extractor = torchvision.models.alexnet(
+                     pretrained=True
+                 ).features
+        except RuntimeError as e:
+            if "invalid hash value" in str(e) or "corrupted" in str(e).lower():
+                import os
+                # 如果是哈希不匹配错误，说明网络波动导致下载的文件损坏了
+                # 我们手动把它删掉，然后再重新尝试下载一次
+                cache_dir = os.path.expanduser('~/.cache/torch/hub/checkpoints')
+                model_path = os.path.join(cache_dir, 'alexnet-owt-7be5be79.pth')
+                if os.path.exists(model_path):
+                    os.remove(model_path)
+                print("检测到由于网络波动导致损坏的预训练权重，已删除。正在为您重新下载，请稍候...")
+                if hasattr(torchvision.models, 'AlexNet_Weights'):
+                     self.feature_extractor = torchvision.models.alexnet(
+                         weights=torchvision.models.AlexNet_Weights.IMAGENET1K_V1
+                     ).features
+                else:
+                     self.feature_extractor = torchvision.models.alexnet(
+                         pretrained=True
+                     ).features
+            else:
+                raise e
+        except Exception:
+             self.feature_extractor = torchvision.models.alexnet(pretrained=False).features
+
         # While the pretrained models of torchvision are trained using
         # images with RGB channel order, in this repository images are
         # treated as BGR channel order.

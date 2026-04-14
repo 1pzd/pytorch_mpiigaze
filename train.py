@@ -13,6 +13,7 @@ from gaze_estimation import (GazeEstimationMethod, create_dataloader,
 from gaze_estimation.utils import (AverageMeter, compute_angle_error,
                                    create_train_output_dir, load_config,
                                    save_config, set_seeds, setup_cudnn)
+import os
 
 
 def train(epoch, model, optimizer, scheduler, loss_function, train_loader,
@@ -137,7 +138,21 @@ def main():
     set_seeds(config.train.seed)
     setup_cudnn(config)
 
-    output_dir = create_train_output_dir(config)
+    # Check if a resume checkpoint is provided via command line option
+    # Note: resume functionality is built into fvcore Checkpointer,
+    # but we need to configure it correctly if a path is specified.
+    resume_checkpoint = getattr(config.train, 'resume', '')
+
+    # Avoid RuntimeError if output directory already exists during resume
+    import pathlib
+    output_root_dir = pathlib.Path(config.train.output_dir)
+    if config.train.test_id != -1:
+        output_dir = output_root_dir / f'{config.train.test_id:02}'
+    else:
+        output_dir = output_root_dir / 'all'
+    if not output_dir.exists():
+        output_dir.mkdir(exist_ok=True, parents=True)
+
     save_config(config, output_dir)
     logger = create_logger(name=__name__,
                            output_dir=output_dir,
@@ -149,18 +164,27 @@ def main():
     loss_function = create_loss(config)
     optimizer = create_optimizer(config, model)
     scheduler = create_scheduler(config, optimizer)
+    
     checkpointer = Checkpointer(model,
                                 optimizer=optimizer,
                                 scheduler=scheduler,
                                 save_dir=output_dir.as_posix(),
                                 save_to_disk=True)
+    
     tensorboard_writer = create_tensorboard_writer(config, output_dir)
 
-    if config.train.val_first:
+    start_epoch = 1
+    if resume_checkpoint:
+        logger.info(f"Resuming from checkpoint: {resume_checkpoint}")
+        checkpoint_data = checkpointer.resume_or_load(resume_checkpoint, resume=True)
+        if checkpoint_data and 'epoch' in checkpoint_data:
+             start_epoch = checkpoint_data['epoch'] + 1
+
+    if config.train.val_first and start_epoch == 1:
         validate(0, model, loss_function, val_loader, config,
                  tensorboard_writer, logger)
 
-    for epoch in range(1, config.scheduler.epochs + 1):
+    for epoch in range(start_epoch, config.scheduler.epochs + 1):
         train(epoch, model, optimizer, scheduler, loss_function, train_loader,
               config, tensorboard_writer, logger)
         scheduler.step()

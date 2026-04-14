@@ -1,7 +1,7 @@
 mode: MPIIGaze
 device: cuda
 dataset:
-  dataset_dir: datasets/MPIIGaze.h5
+  dataset_dir: output/MPIIGaze.h5
 model:
   name: lenet
 test:
@@ -10,7 +10,7 @@ test:
   output_dir: experiments/mpiigaze/lenet/exp00/00/eval
   batch_size: 256
   dataloader:
-    num_workers: 4
+    num_workers: 0
     pin_memory: False
 cudnn:
   benchmark: True

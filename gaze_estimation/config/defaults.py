@@ -6,7 +6,7 @@ config = ConfigNode()
 config.mode = 'MPIIGaze'
 
 config.dataset = ConfigNode()
-config.dataset.dataset_dir = 'datasets/MPIIGaze.h5'
+config.dataset.dataset_dir = 'output/MPIIFaceGaze.h5'
 
 # transform
 config.transform = ConfigNode()
@@ -40,6 +40,7 @@ config.train.val_period = 1
 
 config.train.test_id = 0
 config.train.val_ratio = 0.1
+config.train.resume = ''
 
 config.train.output_dir = 'experiments/mpiigaze/exp00'
 config.train.log_period = 100
@@ -50,6 +51,10 @@ config.tensorboard = ConfigNode()
 config.tensorboard.train_images = False
 config.tensorboard.val_images = False
 config.tensorboard.model_params = False
+
+# Multi-task loss weights
+config.train.gaze_loss_weight = 1.0
+config.train.pose_loss_weight = 1.0
 
 # optimizer
 config.optim = ConfigNode()

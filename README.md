@@ -1,129 +1,116 @@
-# An unofficial PyTorch implementation of MPIIGaze and MPIIFaceGaze
+## 项目文件/文件夹 完整说明
+### 一、根目录核心文件（直接运行/配置）
 
-[![MIT License](https://img.shields.io/badge/license-MIT-green)](https://opensource.org/licenses/MIT)
-[![GitHub stars](https://img.shields.io/github/stars/hysts/pytorch_mpiigaze.svg?style=flat-square&logo=github&label=Stars&logoColor=white)](https://github.com/hysts/pytorch_mpiigaze)
+| 文件名 | 作用 |
+| :--- | :--- |
+| `train.py` | **模型训练主脚本**，用于训练 MPIIGaze/MPIIFaceGaze 视线估计模型 |
+| `evaluate.py` | **模型评估主脚本**，测试训练好的模型，计算视线预测误差 |
+| `demo.py` | **实时演示脚本**，调用摄像头/视频，实时显示人脸+视线方向 |
+| `requirements.txt` | 项目依赖清单，一键安装所有需要的Python库 |
+| `README.md` | 项目说明文档，基础介绍、使用方法 |
+| `.gitignore` | Git忽略文件配置，排除不需要上传的文件（模型权重、数据集等） |
 
-[Here](https://github.com/hysts/pytorch_mpiigaze_demo) is a demo program.
-See also [this repo](https://github.com/hysts/pl_gaze_estimation).
+---
 
-## Requirements
+### 二、核心文件夹详解
+#### 📁 `configs/`
+**作用**：项目**所有配置文件**（YAML格式），无需改代码，改这里即可调整参数
+- `mpiigaze/`：MPIIGaze 数据集训练/评估配置（模型、学习率、批次大小等）
+- `mpiifacegaze/`：MPIIFaceGaze 数据集训练/评估配置
+- `demo_xxx.yaml`：Demo 实时演示配置文件
 
-* Linux (Tested on Ubuntu only)
-* Python >= 3.7
+**以 MPIIGaze 配置为例：**
 
+| 文件名 | 模型 | 阶段 | 数据范围 |
+| :--- | :--- | :--- | :--- |
+| `lenet_train.yaml` | LeNet | 训练 | 部分 / 默认数据 |
+| `lenet_eval.yaml` | LeNet | 评估 | 部分 / 默认数据 |
+| `lenet_train_using_all_data.yaml` | LeNet | 训练 | 全量数据 |
+| `resnet_preact_train.yaml` | ResNet (Pre-Act) | 训练 | 部分 / 默认数据 |
+| `resnet_preact_eval.yaml` | ResNet (Pre-Act) | 评估 | 部分 / 默认数据 |
+| `resnet_preact_train_using_all_data.yaml` | ResNet (Pre-Act) | 训练 | 全量数据 |
+| `alexnet_train.yaml` | **AlexNet** | 训练 | 部分 / 默认数据 |
+| `alexnet_eval.yaml` | **AlexNet** | 评估 | 部分 / 默认数据 |
+
+#### 📁 `data/`
+**作用**：存放项目运行所需的**静态资源文件**
+- `calib/`：相机标定参数（用于图像矫正、3D坐标计算）
+- `dlib/`：dlib 人脸68关键点检测预训练模型（Demo必需）
+- `models/`：训练完成的模型权重文件（自动保存于此）
+
+#### 📁 `gaze_estimation/`
+**作用**：✅ **项目核心代码包**（整个项目的算法灵魂）
+- 模型定义、数据加载、视线估计算法、头部姿态估计、可视化工具
+- 损失函数、优化器、配置管理、数据预处理等全部核心逻辑
+- **自定义模型说明**：在 `gaze_estimation/models/mpiigaze/` 目录下可以添加自定义模型代码（例如 `alexnet.py`），通过在 YAML 配置文件中指定 `model.name` 即可实现动态调用。
+
+#### 📁 `tools/`
+**作用**：数据预处理/辅助工具脚本
+- `preprocess_xxx.py`：将原始数据集转换为项目可用格式
+- `capture_video.py`：录制视频，用于Demo测试
+
+#### 📁 `scripts/`
+**作用**：一键自动化脚本（Shell脚本）
+- 自动下载数据集、预训练模型
+- 批量训练/评估所有测试样本，无需手动敲命令
+
+#### 📁 `figures/`
+**作用**：项目效果图存放
+- 训练曲线、模型精度对比图、Demo演示截图
+
+---
+
+## 零基础训练与运行指南
+
+### 第一步：准备数据与模型（必做）
+**1. 下载 MPIIGaze 数据集并预处理**
+（说明：本项目依赖 `.h5` 格式的数据集，需要先下载原始数据并用脚本转换）
+运行脚本自动下载人脸检测模型和数据集：
 ```bash
-pip install -r requirements.txt
+# 下载dlib人脸关键点模型（Demo必需）
+sh scripts/download_dlib_model.sh
+
+# 下载MPIIGaze数据集（如果你还没有下载的话）
+sh scripts/download_mpiigaze_dataset.sh
+```
+> Windows 系统如果无法运行 sh 脚本，可以打开脚本文件，手动复制里面的链接到浏览器下载，并放到对应的 `data/` 文件夹下。
+
+**预处理数据**：使用 `tools/` 目录下的脚本将原始数据集处理为 h5 格式，放到指定的输出目录（通常配置在 yaml 文件的 `dataset.dataset_dir`，比如 `output/MPIIGaze.h5`）。
+
+---
+
+### 第二步：训练视线估计模型
+
+所有训练的参数（学习率、模型选择、数据路径等）都在 `configs/` 下的 yaml 文件里。你只需要指定想用的配置即可。
+
+**示例 1：使用经典的 LeNet 模型训练**
+```bash
+python train.py --config configs/mpiigaze/resnet_preact_train.yaml
 ```
 
-
-## Download the dataset and preprocess it
-
-### MPIIGaze
-
+**示例 2：使用最新添加的 AlexNet 模型训练**
+我们已经在代码中加入了针对 MPIIGaze 数据集适配的 AlexNet 模型，直接运行：
 ```bash
-bash scripts/download_mpiigaze_dataset.sh
-python tools/preprocess_mpiigaze.py --dataset datasets/MPIIGaze -o datasets/
+python train.py --config configs/mpiifacegaze/resnet_simple_14_train.yaml
 ```
 
-### MPIIFaceGaze
+**训练过程说明：**
+- 运行后，终端会打印出当前的网络配置并开始逐个 Epoch 训练。
+- 训练完成后，模型权重文件（checkpoint）会自动保存到 `experiments/mpiigaze/` 或 `data/models/` 对应的子文件夹中。
+- 你可以使用 Tensorboard 观察训练曲线。
 
+---
+
+### 第三步：评估模型精度
+
+测试训练好的模型，计算预测的平均角度误差（误差越小越精准）。你需要使用对应的 eval 配置文件，并在配置文件中指定刚才训练好的模型权重路径（`test.checkpoint`）。
+
+以评估 AlexNet 为例：
 ```bash
-bash scripts/download_mpiifacegaze_dataset.sh
-python tools/preprocess_mpiifacegaze.py --dataset datasets/MPIIFaceGaze_normalized -o datasets/
+python evaluate.py --config configs/mpiigaze/alexnet_eval.yaml
+python evaluate.py --config configs/mpiifacegaze/alexnet_eval.yaml
+python evaluate.py --config configs/mpiigaze/resnet_preact_eval.yaml
+python evaluate.py --config configs/mpiifacegaze/resnet_simple_14_eval.yaml
 ```
+终端会输出当前模型在测试集上的平均角度误差。
 
-
-## Usage
-
-This repository uses [YACS](https://github.com/rbgirshick/yacs) for
-configuration management.
-Default parameters are specified in
-[`gaze_estimation/config/defaults.py`](gaze_estimation/config/defaults.py)
-(which is not supposed to be modified directly).
-You can overwrite those default parameters using a YAML file like
-[`configs/mpiigaze/lenet_train.yaml`](configs/mpiigaze/lenet_train.yaml).
-
-
-### Training and Evaluation
-
-By running the following code, you can train a model using all the
-data except the person with ID 0, and run test on that person.
-
-```bash
-python train.py --config configs/mpiigaze/lenet_train.yaml
-python evaluate.py --config configs/mpiigaze/lenet_eval.yaml
-```
-
-Using [`scripts/run_all_mpiigaze_lenet.sh`](scripts/run_all_mpiigaze_lenet.sh) and
-[`scripts/run_all_mpiigaze_resnet_preact.sh`](scripts/run_all_mpiigaze_resnet_preact.sh),
-you can run all training and evaluation for LeNet and ResNet-8 with
-default parameters.
-
-
-## Results
-
-### MPIIGaze
-
-| Model           | Mean Test Angle Error [degree] | Training Time |
-|:----------------|:------------------------------:|--------------:|
-| LeNet           |              6.52              |  3.5 s/epoch  |
-| ResNet-preact-8 |              5.73              |   7 s/epoch   |
-
-The training time is the value when using GTX 1080Ti.
-
-![](figures/mpiigaze/lenet.png)
-
-![](figures/mpiigaze/resnet_preact_8.png)
-
-### MPIIFaceGaze
-
-| Model     | Mean Test Angle Error [degree] | Training Time |
-|:----------|:------------------------------:|--------------:|
-| AlexNet   |              5.06              |  135 s/epoch  |
-| ResNet-14 |              4.83              |   62 s/epoch  |
-
-The training time is the value when using GTX 1080Ti.
-
-![](figures/mpiifacegaze/alexnet.png)
-
-![](figures/mpiifacegaze/resnet_simple.png)
-
-
-
-
-### Demo
-
-This demo program runs gaze estimation on the video from a webcam.
-
-1. Download the dlib pretrained model for landmark detection.
-
-    ```bash
-    bash scripts/download_dlib_model.sh
-    ```
-
-2. Calibrate the camera.
-
-    Save the calibration result in the same format as the sample
-    file [`data/calib/sample_params.yaml`](data/calib/sample_params.yaml).
-
-4. Run demo.
-
-    Specify the model path and the path of the camera calibration results
-    in the configuration file as in
-    [`configs/demo_mpiigaze_resnet.yaml`](configs/demo_mpiigaze_resnet.yaml).
-
-    ```bash
-    python demo.py --config configs/demo_mpiigaze_resnet.yaml
-    ```
-
-## Related repos
-
-- https://github.com/hysts/pl_gaze_estimation
-- https://github.com/hysts/pytorch_mpiigaze_demo
-
-## References
-
-* Zhang, Xucong, Yusuke Sugano, Mario Fritz, and Andreas Bulling. "Appearance-based Gaze Estimation in the Wild." Proc. of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR), 2015. [arXiv:1504.02863](https://arxiv.org/abs/1504.02863), [Project Page](https://www.mpi-inf.mpg.de/departments/computer-vision-and-multimodal-computing/research/gaze-based-human-computer-interaction/appearance-based-gaze-estimation-in-the-wild/)
-* Zhang, Xucong, Yusuke Sugano, Mario Fritz, and Andreas Bulling. "It's Written All Over Your Face: Full-Face Appearance-Based Gaze Estimation." Proc. of the IEEE Conference on Computer Vision and Pattern Recognition Workshops(CVPRW), 2017. [arXiv:1611.08860](https://arxiv.org/abs/1611.08860), [Project Page](https://www.mpi-inf.mpg.de/departments/computer-vision-and-machine-learning/research/gaze-based-human-computer-interaction/its-written-all-over-your-face-full-face-appearance-based-gaze-estimation/)
-* Zhang, Xucong, Yusuke Sugano, Mario Fritz, and Andreas Bulling. "MPIIGaze: Real-World Dataset and Deep Appearance-Based Gaze Estimation." IEEE transactions on pattern analysis and machine intelligence 41 (2017). [arXiv:1711.09017](https://arxiv.org/abs/1711.09017)
-* Zhang, Xucong, Yusuke Sugano, and Andreas Bulling. "Evaluation of Appearance-Based Methods and Implications for Gaze-Based Applications." Proc. ACM SIGCHI Conference on Human Factors in Computing Systems (CHI), 2019. [arXiv](https://arxiv.org/abs/1901.10906), [code](https://git.hcics.simtech.uni-stuttgart.de/public-projects/opengaze)

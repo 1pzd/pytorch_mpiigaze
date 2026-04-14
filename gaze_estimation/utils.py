@@ -52,6 +52,12 @@ def create_train_output_dir(config: yacs.config.CfgNode) -> pathlib.Path:
         output_dir = output_root_dir / f'{config.train.test_id:02}'
     else:
         output_dir = output_root_dir / 'all'
+    
+    # Allow resuming by bypassing the existence check if resume path is specified
+    if getattr(config.train, 'resume', ''):
+        output_dir.mkdir(exist_ok=True, parents=True)
+        return output_dir
+        
     if output_dir.exists():
         raise RuntimeError(
             f'Output directory `{output_dir.as_posix()}` already exists.')

@@ -1,7 +1,7 @@
 mode: MPIIFaceGaze
 device: cuda
 dataset:
-  dataset_dir: datasets/MPIIFaceGaze.h5
+  dataset_dir: output/MPIIFaceGaze.h5
 transform:
   mpiifacegaze_face_size: 448
   mpiifacegaze_gray: False
@@ -9,11 +9,11 @@ model:
   name: alexnet
 test:
   test_id: 0
-  checkpoint: experiments/mpiifacegaze/alexnet/exp00/00/checkpoint_0015.pth
+  checkpoint: experiments/mpiifacegaze/alexnet/exp00/00/checkpoint_0010.pth
   output_dir: experiments/mpiifacegaze/alexnet/exp00/00/eval
   batch_size: 256
   dataloader:
-    num_workers: 4
+    num_workers: 0
     pin_memory: False
 cudnn:
   benchmark: True

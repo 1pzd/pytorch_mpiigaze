@@ -1,7 +1,7 @@
 mode: MPIIGaze
 device: cuda
 dataset:
-  dataset_dir: datasets/MPIIGaze.h5
+  dataset_dir: output/MPIIGaze.h5
 model:
   name: resnet_preact
 train:
@@ -21,14 +21,14 @@ train:
   checkpoint_period: 10
   use_tensorboard: True
   train_dataloader:
-    num_workers: 4
+    num_workers: 0
     drop_last: True
     pin_memory: False
   val_dataloader:
-    num_workers: 4
+    num_workers: 0
     pin_memory: False
 scheduler:
-  epochs: 40
+  epochs: 30
   type: multistep
   milestones: [30, 35]
   lr_decay: 0.1

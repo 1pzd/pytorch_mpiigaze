@@ -1,7 +1,7 @@
 mode: MPIIFaceGaze
 device: cuda
 dataset:
-  dataset_dir: datasets/MPIIFaceGaze.h5
+  dataset_dir: output/MPIIFaceGaze.h5
 transform:
   mpiifacegaze_face_size: 224
   mpiifacegaze_gray: False
@@ -28,15 +28,16 @@ train:
   log_period: 100
   checkpoint_period: 5
   use_tensorboard: True
+  resume: experiments/mpiifacegaze/resnet_simple_14/exp00/00/checkpoint_0005.pth
   train_dataloader:
-    num_workers: 4
+    num_workers: 0
     drop_last: True
     pin_memory: False
   val_dataloader:
-    num_workers: 4
+    num_workers: 0
     pin_memory: False
 scheduler:
-  epochs: 15
+  epochs: 30
   type: multistep
   milestones: [10, 13]
   lr_decay: 0.1

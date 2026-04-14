@@ -1,7 +1,7 @@
 mode: MPIIFaceGaze
 device: cuda
 dataset:
-  dataset_dir: datasets/MPIIFaceGaze.h5
+  dataset_dir: output/MPIIFaceGaze.h5
 transform:
   mpiifacegaze_face_size: 224
   mpiifacegaze_gray: False
@@ -14,11 +14,11 @@ model:
     resnet_layers: [2, 2, 2]
 test:
   test_id: 0
-  checkpoint: experiments/mpiifacegaze/resnet_simple_14/exp00/00/checkpoint_0015.pth
+  checkpoint: experiments/mpiifacegaze/resnet_simple_14/exp00/00/checkpoint_0010.pth
   output_dir: experiments/mpiifacegaze/resnet_simple_14/exp00/00/eval
   batch_size: 256
   dataloader:
-    num_workers: 4
+    num_workers: 0
     pin_memory: False
 cudnn:
   benchmark: True
